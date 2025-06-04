@@ -1,8 +1,8 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
 
-// These are placeholders—swap them out for real auth logic.
-const isAuthenticated = () => sessionStorage.getItem('loggedIn') === 'true';
+// Only allow through if a token exists. If requireAdmin is true, also check role.
+const isAuthenticated = () => !!sessionStorage.getItem('token');
 const isAdmin = () => sessionStorage.getItem('role') === 'admin';
 
 const ProtectedRoute = ({ children, requireAdmin }) => {
@@ -10,7 +10,7 @@ const ProtectedRoute = ({ children, requireAdmin }) => {
     return <Navigate to="/login" replace />;
   }
   if (requireAdmin && !isAdmin()) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/login" replace />;
   }
   return children;
 };

@@ -1,63 +1,75 @@
-import React, { useEffect, useState } from 'react';
+// src/pages/AdminPanel.jsx
+import React, { useState } from 'react';
 import {
   Layout,
   Menu,
   Table,
   Button,
   Card,
+  Modal,
+  Form,
+  Input,
+  Switch,
   Popconfirm,
-  message,
-  Tag
+  message
 } from 'antd';
-import { LogoutOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined,
+  DeleteOutlined,
+  LogoutOutlined
+} from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
+// ← Import the new Plate component
+import Plate from '../components/Plate';
+
 const { Header, Content, Sider } = Layout;
+let nextId = 1;
 
 const AdminPanel = () => {
   const navigate = useNavigate();
-  const [requests, setRequests] = useState([]);
-  const [loadingReqs, setLoadingReqs] = useState(false);
+  const [plates, setPlates] = useState([
+    { id: nextId++, plate: 'ABC123', authorized: true },
+    { id: nextId++, plate: 'XYZ789', authorized: false }
+  ]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [addForm] = Form.useForm();
 
-  useEffect(() => {
-    fetchPendingRequests();
-  }, []);
+  const openModal = () => {
+    addForm.resetFields();
+    setIsModalOpen(true);
+  };
 
-  const fetchPendingRequests = async () => {
-    setLoadingReqs(true);
-    try {
-      // Real API call:
-      // const res = await fetch('/api/requests?status=pending', { headers: { Authorization: `Bearer ${token}` } });
-      // const data = await res.json();
-
-      // MOCKED for demo:
-      const data = [
-        {
-          id: 5,
-          userId: 17,
-          username: 'user1',
-          plate: 'XYZ789',
-          action: 'add',
-          requestedStatus: null,
-          createdAt: '2025-05-20T14:32:00Z'
-        },
-        {
-          id: 6,
-          userId: 42,
-          username: 'user2',
-          plate: 'DEF456',
-          action: 'update',
-          requestedStatus: 'Authorized',
-          createdAt: '2025-05-21T09:15:00Z'
-        }
-      ];
-
-      setRequests(data);
-    } catch (err) {
-      message.error('Failed to load pending requests');
-    } finally {
-      setLoadingReqs(false);
+  const onAddPlate = (values) => {
+    const existing = plates.find((p) => p.plate === values.plate.trim());
+    if (existing) {
+      message.error('That plate is already in the list');
+      return;
     }
+    setPlates((prev) => [
+      ...prev,
+      { id: nextId++, plate: values.plate.trim(), authorized: false }
+    ]);
+    message.success(`Added plate "${values.plate.trim()}"`);
+    setIsModalOpen(false);
+  };
+
+  const toggleAuthorized = (record) => {
+    setPlates((prev) =>
+      prev.map((p) =>
+        p.id === record.id ? { ...p, authorized: !p.authorized } : p
+      )
+    );
+    message.info(
+      `${record.plate} is now ${
+        record.authorized ? 'Denied' : 'Authorized'
+      }`
+    );
+  };
+
+  const deletePlate = (record) => {
+    setPlates((prev) => prev.filter((p) => p.id !== record.id));
+    message.success(`Deleted plate "${record.plate}"`);
   };
 
   const handleLogout = () => {
@@ -65,95 +77,38 @@ const AdminPanel = () => {
     navigate('/login');
   };
 
-  const approveRequest = async (requestId) => {
-    try {
-      // await fetch(`/api/requests/${requestId}`, {
-      //   method: 'PUT',
-      //   headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      //   body: JSON.stringify({ status: 'approved' })
-      // });
-      message.success(`Approved request #${requestId}`);
-      fetchPendingRequests();
-    } catch (err) {
-      message.error('Failed to approve');
-    }
-  };
-
-  const rejectRequest = async (requestId) => {
-    try {
-      // await fetch(`/api/requests/${requestId}`, {
-      //   method: 'PUT',
-      //   headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      //   body: JSON.stringify({ status: 'rejected' })
-      // });
-      message.error(`Rejected request #${requestId}`);
-      fetchPendingRequests();
-    } catch (err) {
-      message.error('Failed to reject');
-    }
-  };
-
+  // Here’s the only change: render <Plate /> instead of plain text
   const columns = [
     {
       title: 'Plate',
       dataIndex: 'plate',
-      key: 'plate'
+      key: 'plate',
+      render: (_, record) => (
+        <Plate text={record.plate} authorized={record.authorized} />
+      )
     },
     {
-      title: 'Requested By',
-      dataIndex: 'username',
-      key: 'username'
+      title: 'Authorized?',
+      dataIndex: 'authorized',
+      key: 'authorized',
+      render: (auth, record) => (
+        <Switch
+          checked={auth}
+          onChange={() => toggleAuthorized(record)}
+        />
+      )
     },
     {
       title: 'Action',
-      dataIndex: 'action',
       key: 'action',
-      render: (action) => (
-        <Tag color={action === 'add' ? 'green' : 'blue'}>
-          {action.toUpperCase()}
-        </Tag>
-      )
-    },
-    {
-      title: 'Desired Status',
-      dataIndex: 'requestedStatus',
-      key: 'requestedStatus',
-      render: (status, record) =>
-        record.action === 'update' ? (
-          <Tag>{status || '—'}</Tag>
-        ) : (
-          <Tag>—</Tag>
-        )
-    },
-    {
-      title: 'Requested At',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      render: (ts) => new Date(ts).toLocaleString('en-GB')
-    },
-    {
-      title: 'Approve',
-      key: 'approve',
-      render: (_, record) => (
-        <Button
-          type="primary"
-          onClick={() => approveRequest(record.id)}
-        >
-          Approve
-        </Button>
-      )
-    },
-    {
-      title: 'Reject',
-      key: 'reject',
       render: (_, record) => (
         <Popconfirm
-          title="Are you sure you want to reject?"
-          onConfirm={() => rejectRequest(record.id)}
+          title={`Delete "${record.plate}"?`}
+          onConfirm={() => deletePlate(record)}
           okText="Yes"
           cancelText="No"
         >
-          <Button danger>Reject</Button>
+          <Button danger icon={<DeleteOutlined />} />
         </Popconfirm>
       )
     }
@@ -161,7 +116,6 @@ const AdminPanel = () => {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      {/* Sidebar */}
       <Sider>
         <div
           style={{
@@ -174,10 +128,9 @@ const AdminPanel = () => {
         >
           Admin Panel
         </div>
-        <Menu theme="dark" mode="inline" defaultSelectedKeys={['1']}>
-          <Menu.Item key="1">Pending Requests</Menu.Item>
+        <Menu theme="dark" mode="inline" defaultSelectedKeys={['logout']}>
           <Menu.Item
-            key="2"
+            key="logout"
             icon={<LogoutOutlined />}
             onClick={handleLogout}
           >
@@ -186,22 +139,63 @@ const AdminPanel = () => {
         </Menu>
       </Sider>
 
-      {/* Main Content */}
       <Layout>
-        <Header style={{ background: '#fff', padding: 0 }} />
+        <Header
+          style={{
+            background: '#fff',
+            padding: '0 16px',
+            display: 'flex',
+            alignItems: 'center'
+          }}
+        >
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={openModal}
+          >
+            Add Plate
+          </Button>
+        </Header>
+
         <Content style={{ margin: '16px' }}>
-          <Card title="User Plate Requests" bordered={false}>
+          <Card title="Plates List" bordered={false}>
             <Table
-              dataSource={requests.map(r => ({
-                key: r.id,
-                ...r
-              }))}
+              dataSource={plates.map((p) => ({ key: p.id, ...p }))}
               columns={columns}
-              loading={loadingReqs}
+              pagination={false}
             />
           </Card>
         </Content>
       </Layout>
+
+      <Modal
+        title="Add a New Plate"
+        open={isModalOpen}
+        onCancel={() => setIsModalOpen(false)}
+        footer={null}
+      >
+        <Form form={addForm} layout="vertical" onFinish={onAddPlate}>
+          <Form.Item
+            label="Plate Number"
+            name="plate"
+            rules={[
+              { required: true, message: 'Please enter a plate number' },
+              {
+                pattern: /^[A-Z0-9]{1,8}$/,
+                message:
+                  'Use only uppercase letters/numbers (max 8 chars)'
+              }
+            ]}
+          >
+            <Input placeholder="e.g. GHI789" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" block>
+              Add Plate
+            </Button>
+          </Form.Item>
+        </Form>
+      </Modal>
     </Layout>
   );
 };
