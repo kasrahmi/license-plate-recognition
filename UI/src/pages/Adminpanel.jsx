@@ -1,5 +1,8 @@
 // src/pages/AdminPanel.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+
+import API_BASE_URL from '../config';
+
 import {
   Layout,
   Menu,
@@ -24,14 +27,10 @@ import { useNavigate } from 'react-router-dom';
 import Plate from '../components/Plate';
 
 const { Header, Content, Sider } = Layout;
-let nextId = 1;
 
 const AdminPanel = () => {
   const navigate = useNavigate();
-  const [plates, setPlates] = useState([
-    { id: nextId++, plate: 'ABC123', authorized: true },
-    { id: nextId++, plate: 'XYZ789', authorized: false }
-  ]);
+  const [plates, setPlates] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [addForm] = Form.useForm();
 
@@ -40,37 +39,88 @@ const AdminPanel = () => {
     setIsModalOpen(true);
   };
 
-  const onAddPlate = (values) => {
-    const existing = plates.find((p) => p.plate === values.plate.trim());
-    if (existing) {
-      message.error('That plate is already in the list');
+const onAddPlate = async (values) => {
+  const newPlate = values.plate.trim();
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/plates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plate: newPlate }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      message.error(err.error || 'Failed to add plate');
       return;
     }
-    setPlates((prev) => [
-      ...prev,
-      { id: nextId++, plate: values.plate.trim(), authorized: false }
-    ]);
-    message.success(`Added plate "${values.plate.trim()}"`);
+
+    setPlates(prev => [...prev, { key: newPlate, plate: newPlate, authorized: false }]);
+    message.success(`Added plate "${newPlate}"`);
     setIsModalOpen(false);
-  };
+  } catch (err) {
+    message.error('Server error');
+  }
+};
 
-  const toggleAuthorized = (record) => {
-    setPlates((prev) =>
-      prev.map((p) =>
-        p.id === record.id ? { ...p, authorized: !p.authorized } : p
-      )
-    );
-    message.info(
-      `${record.plate} is now ${
-        record.authorized ? 'Denied' : 'Authorized'
-      }`
-    );
-  };
 
-  const deletePlate = (record) => {
-    setPlates((prev) => prev.filter((p) => p.id !== record.id));
-    message.success(`Deleted plate "${record.plate}"`);
-  };
+const toggleAuthorized = async (record) => {
+  try {
+  const res = await fetch(`${API_BASE_URL}/plates/${record.plate}`, {
+      method: 'PATCH',
+    });
+
+    if (res.ok) {
+      setPlates(prev =>
+        prev.map(p =>
+          p.plate === record.plate ? { ...p, authorized: !p.authorized } : p
+        )
+      );
+      message.success(`${record.plate} is now ${!record.authorized ? 'Authorized' : 'Denied'}`);
+    } else {
+      message.error('Failed to toggle');
+    }
+  } catch (err) {
+    message.error('Server error');
+  }
+};
+
+
+  useEffect(() => {
+  fetch(`${API_BASE_URL}/plates`)
+    .then(res => res.json())
+    .then(data => {
+      const formatted = data.map((item, index) => ({
+        key: item.plate,
+        plate: item.plate,
+        authorized: item.authorized === 'True',
+      }));
+      setPlates(formatted);
+    })
+    .catch(err => {
+      console.error('Failed to load plates:', err);
+      message.error('Could not load plates');
+    });
+}, []);
+
+
+const deletePlate = async (record) => {
+  try {
+    const res = await fetch(`${API_BASE_URL}/plates/${record.plate}`, {
+      method: 'DELETE',
+    });
+
+    if (res.ok) {
+      setPlates(prev => prev.filter(p => p.plate !== record.plate));
+      message.success(`Deleted plate "${record.plate}"`);
+    } else {
+      message.error('Failed to delete');
+    }
+  } catch (err) {
+    message.error('Server error');
+  }
+};
+
 
   const handleLogout = () => {
     sessionStorage.clear();
