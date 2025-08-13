@@ -3,6 +3,9 @@ import React, { useState, useEffect } from 'react';
 
 import API_BASE_URL from '../config';
 
+// Camera server configuration
+const CAMERA_SERVER_URL = import.meta.env.VITE_CAMERA_SERVER_URL || 'http://192.168.1.33/';
+
 import {
   Layout,
   Menu,
@@ -214,6 +217,35 @@ const deletePlate = async (record) => {
               columns={columns}
               pagination={false}
             />
+          </Card>
+          
+          <Card title="Camera Feed" bordered={false} style={{ marginTop: '16px' }}>
+            <div style={{ textAlign: 'center' }}>
+              {/* Debug info */}
+              <div style={{ 
+                marginBottom: '10px', 
+                fontSize: '12px', 
+                color: '#666',
+                textAlign: 'center'
+              }}>
+                Camera Server: {CAMERA_SERVER_URL}
+              </div>
+              <iframe 
+                src={CAMERA_SERVER_URL}
+                style={{
+                  width: '100%',
+                  maxWidth: '640px',
+                  height: 'min(75vw, 480px)',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: '10px',
+                  overflow: 'hidden'
+                }}
+                title="Camera Feed"
+                frameBorder="0"
+                scrolling="no"
+                seamless
+              />
+            </div>
           </Card>
         </Content>
       </Layout>
