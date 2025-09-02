@@ -1,6 +1,9 @@
 from flask import Flask, request, jsonify
 import csv
 import os
+import cv2
+import numpy as np
+import easyocr
 from flask_cors import CORS
 
 
@@ -8,6 +11,8 @@ app = Flask(__name__)
 CORS(app) 
 CSV_FILE = 'plates.csv'
 FIELDNAMES = ['plate', 'authorized']
+
+reader = easyocr.Reader(['en'])
 
 def read_csv():
     if not os.path.exists(CSV_FILE):
@@ -56,6 +61,36 @@ def delete_plate(plate):
         return jsonify({'error': 'Plate not found'}), 404
     write_csv(new_rows)
     return jsonify({'message': 'Plate deleted'})
+
+@app.route("/detect_plate", methods=["POST"])
+def detect_plate():
+    if "image" not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
+
+    file = request.files["image"]
+    img_bytes = np.frombuffer(file.read(), np.uint8)
+    image = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
+
+    results = reader.readtext(image)
+
+    if not results:
+        return jsonify({"error": "No text detected"}), 404
+
+    best_result = max(results, key=lambda x: x[2])
+    _, plate_text, prob = best_result
+
+    rows = read_csv()
+    authorized = False
+    for row in rows:
+        if row['plate'].strip().upper() == plate_text.strip().upper():
+            authorized = row['authorized'] == 'True'
+            break
+
+    return jsonify({
+        "plate": plate_text,
+        "confidence": f"{prob:.2f}",
+        "authorized": authorized
+    })
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
