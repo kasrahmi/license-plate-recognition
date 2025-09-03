@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import easyocr
 from flask_cors import CORS
+import re
 
 
 app = Flask(__name__)
@@ -12,7 +13,17 @@ CORS(app)
 CSV_FILE = 'plates.csv'
 FIELDNAMES = ['plate', 'authorized']
 
+_PLATE_REGEX = re.compile(r"^\d{4}[A-Z]{3}$")
+
+
 reader = easyocr.Reader(['en'])
+
+def _normalize_text_for_plate(s: str) -> str:
+    """Remove non-alnum, uppercase and strip so OCR variants match the regex."""
+    if not s:
+        return ""
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", s)
+    return cleaned.upper().strip()
 
 def read_csv():
     if not os.path.exists(CSV_FILE):
@@ -76,8 +87,24 @@ def detect_plate():
     if not results:
         return jsonify({"error": "No text detected"}), 404
 
-    best_result = max(results, key=lambda x: x[2])
-    _, plate_text, prob = best_result
+    for p in results:
+        # add a transient normalized field (won't affect other logic)
+        p["_normalized_text"] = _normalize_text_for_plate(p.get("text", ""))
+
+    # keep only those that match the plate regex
+    _valid_candidates = [p for p in results if _PLATE_REGEX.match(p["_normalized_text"])]
+
+    if not _valid_candidates:
+        # strict enforcement: return 400 if none match
+        return jsonify({
+            "error": "No valid plate found matching regex (4 digits followed by 3 letters)."
+        }), 400
+
+    # choose highest-prob among valid candidates and use normalized text
+    _best = max(_valid_candidates, key=lambda x: float(x.get("prob", 0.0)))
+    plate_text = _best["_normalized_text"]
+    prob = float(_best.get("prob", 0.0))
+    # _, plate_text, prob = best_result
 
     rows = read_csv()
     authorized = False
