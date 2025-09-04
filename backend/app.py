@@ -82,35 +82,53 @@ def detect_plate():
     img_bytes = np.frombuffer(file.read(), np.uint8)
     image = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
 
-    results = reader.readtext(image)
+    if image is None:
+        return jsonify({"error": "Could not read image (invalid or corrupted)"}), 400
 
-    if not results:
+    try:
+        # easyocr.readtext returns list of tuples: (bbox, text, prob)
+        results_raw = reader.readtext(image, detail=1)  # detail=1 gives (bbox,text,prob)
+    except Exception as e:
+        return jsonify({"error": f"OCR error: {str(e)}"}), 500
+
+    if not results_raw:
         return jsonify({"error": "No text detected"}), 404
 
+    # normalize results into dicts so rest of code works
+    results = []
+    for item in results_raw:
+        # Expecting (bbox, text, prob)
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            bbox = item[0]
+            text = item[1]
+            prob = float(item[2]) if len(item) > 2 else 0.0
+            results.append({"bbox": bbox, "text": text, "prob": prob})
+        elif isinstance(item, str):
+            results.append({"bbox": None, "text": item, "prob": 0.0})
+
+    # add normalized text for each candidate
     for p in results:
-        # add a transient normalized field (won't affect other logic)
         p["_normalized_text"] = _normalize_text_for_plate(p.get("text", ""))
 
-    # keep only those that match the plate regex
+    print(f"normalized OCR results: {[p['_normalized_text'] for p in results]}")
+
+    # keep only those that match the plate regex (use normalized text or fixed)
     _valid_candidates = [p for p in results if _PLATE_REGEX.match(p["_normalized_text"])]
 
     if not _valid_candidates:
-        # strict enforcement: return 400 if none match
         return jsonify({
             "error": "No valid plate found matching regex (4 digits followed by 3 letters)."
         }), 400
 
-    # choose highest-prob among valid candidates and use normalized text
     _best = max(_valid_candidates, key=lambda x: float(x.get("prob", 0.0)))
     plate_text = _best["_normalized_text"]
     prob = float(_best.get("prob", 0.0))
-    # _, plate_text, prob = best_result
 
     rows = read_csv()
     authorized = False
     for row in rows:
         if row['plate'].strip().upper() == plate_text.strip().upper():
-            authorized = row['authorized'] == 'True'
+            authorized = (row['authorized'] == 'True')
             break
 
     return jsonify({
