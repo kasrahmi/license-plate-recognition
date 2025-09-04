@@ -275,7 +275,7 @@ const deletePlate = async (record) => {
       </Layout>
 
       <Modal
-        title="Add a Not New Plate"
+        title="Add a New Plate"
         open={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
         footer={null}
