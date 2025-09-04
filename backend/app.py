@@ -59,6 +59,7 @@ def write_csv(rows):
 
 @app.route('/plates', methods=['GET'])
 def get_plates():
+    socketio.emit('plates_list', read_csv())
     return jsonify(read_csv())
 
 @app.route('/plates', methods=['POST'])
@@ -72,6 +73,7 @@ def add_plate():
         return jsonify({'error': 'Plate already exists'}), 400
     rows.append({'plate': plate, 'authorized': 'False'})
     write_csv(rows)
+    socketio.emit('plates_list', read_csv())
     return jsonify({'message': 'Plate added'})
 
 @app.route('/plates/<plate>', methods=['PATCH'])
@@ -81,6 +83,7 @@ def toggle_plate(plate):
         if row['plate'] == plate:
             row['authorized'] = 'False' if row['authorized'] == 'True' else 'True'
             write_csv(rows)
+            socketio.emit('plates_list', read_csv())
             return jsonify({'message': 'Authorization toggled'})
     return jsonify({'error': 'Plate not found'}), 404
 
@@ -91,6 +94,7 @@ def delete_plate(plate):
     if len(rows) == len(new_rows):
         return jsonify({'error': 'Plate not found'}), 404
     write_csv(new_rows)
+    socketio.emit('plates_list', read_csv())
     return jsonify({'message': 'Plate deleted'})
 
 @app.route("/detect_plate", methods=["POST"])
@@ -136,8 +140,10 @@ def generate_frames():
         if ocr_results:
             best = ocr_results[0]
             plate_text = best['plate']
-            prob = best['prob']
+            prob = float(best['prob'])
             bbox = best['bbox']
+
+            # draw on frame (your existing drawing code)
             pts = [(int(p[0]), int(p[1])) for p in bbox]
             x1, y1 = min(p[0] for p in pts), min(p[1] for p in pts)
             x2, y2 = max(p[0] for p in pts), max(p[1] for p in pts)
@@ -145,6 +151,18 @@ def generate_frames():
             cv2.putText(display_frame, f"{plate_text} ({prob:.2f})",
                         (x1, max(10, y1 - 10)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+            # --- NEW: check CSV for authorized and emit plate_detected ---
+            rows = read_csv()
+            authorized = any(
+                row['plate'].strip().upper() == plate_text.strip().upper() and row['authorized'] == 'True'
+                for row in rows
+            )
+            socketio.emit('plate_detected', {
+                'plate': plate_text,
+                'confidence': float(prob),
+                'authorized': bool(authorized)
+            })
         else:
             h, w = frame.shape[:2]
             cv2.putText(display_frame, "No valid plate detected",

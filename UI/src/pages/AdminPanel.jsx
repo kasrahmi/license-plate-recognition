@@ -1,5 +1,5 @@
 // src/pages/AdminPanel.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import API_BASE_URL from '../config';
 
@@ -26,33 +26,37 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
-// ← Import the new Plate component
+// Plate component (you already have this)
 import Plate from '../components/Plate';
 
 const { Header, Content, Sider } = Layout;
 
-const CameraFeed = () => {
-  const [image, setImage] = useState(null);
-
-  useEffect(() => {
-    const socket = io(API_BASE_URL); // same backend server
-    socket.on("frame", (data) => {
-      setImage("data:image/jpeg;base64," + data.image);
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
+const CameraFeed = ({ frameSrc, detectedPlate }) => {
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{ marginBottom: '10px', fontSize: '12px', color: '#666' }}>
-        Live Camera Feed
+        Camera Server: {CAMERA_SERVER_URL}
       </div>
-      {image ? (
+
+      <div style={{ marginBottom: '8px' }}>
+        {detectedPlate ? (
+          <div style={{ fontWeight: 600 }}>
+            Detected plate: {detectedPlate.plate} &nbsp; — &nbsp;
+            {detectedPlate.authorized ? (
+              <span style={{ color: 'green' }}>AUTHORIZED</span>
+            ) : (
+              <span style={{ color: 'red' }}>NOT AUTHORIZED</span>
+            )}
+            &nbsp; ({Number(detectedPlate.confidence).toFixed(2)})
+          </div>
+        ) : (
+          <div style={{ color: '#888' }}>No plate detected</div>
+        )}
+      </div>
+
+      {frameSrc ? (
         <img
-          src={image}
+          src={frameSrc}
           alt="Camera"
           style={{
             width: '100%',
@@ -60,6 +64,7 @@ const CameraFeed = () => {
             height: 'auto',
             border: '1px solid #d9d9d9',
             borderRadius: '10px',
+            objectFit: 'contain'
           }}
         />
       ) : (
@@ -75,100 +80,166 @@ const AdminPanel = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [addForm] = Form.useForm();
 
+  // realtime states
+  const [frameSrc, setFrameSrc] = useState(null);
+  const [detectedPlate, setDetectedPlate] = useState(null);
+
+  // keep socket ref so we can reuse/cleanup
+  const socketRef = useRef(null);
+
   const openModal = () => {
     addForm.resetFields();
     setIsModalOpen(true);
   };
 
-const onAddPlate = async (values) => {
-  const newPlate = values.plate.trim();
+  const onAddPlate = async (values) => {
+    const newPlate = values.plate.trim();
 
-  try {
-    const res = await fetch(`${API_BASE_URL}/plates`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plate: newPlate }),
-    });
+    try {
+      const res = await fetch(`${API_BASE_URL}/plates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plate: newPlate }),
+      });
 
-    if (!res.ok) {
-      const err = await res.json();
-      message.error(err.error || 'Failed to add plate');
-      return;
+      if (!res.ok) {
+        const err = await res.json();
+        message.error(err.error || 'Failed to add plate');
+        return;
+      }
+
+      // optimistic update (server will also broadcast plates_list)
+      setPlates(prev => {
+        if (prev.some(p => p.plate === newPlate)) return prev;
+        return [...prev, { key: newPlate, plate: newPlate, authorized: false }];
+      });
+
+      message.success(`Added plate "${newPlate}"`);
+      setIsModalOpen(false);
+    } catch (err) {
+      console.error(err);
+      message.error('Server error');
     }
+  };
 
-    setPlates(prev => [...prev, { key: newPlate, plate: newPlate, authorized: false }]);
-    message.success(`Added plate "${newPlate}"`);
-    setIsModalOpen(false);
-  } catch (err) {
-    message.error('Server error');
-  }
-};
+  const toggleAuthorized = async (record) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/plates/${record.plate}`, {
+        method: 'PATCH',
+      });
 
-
-const toggleAuthorized = async (record) => {
-  try {
-  const res = await fetch(`${API_BASE_URL}/plates/${record.plate}`, {
-      method: 'PATCH',
-    });
-
-    if (res.ok) {
-      setPlates(prev =>
-        prev.map(p =>
-          p.plate === record.plate ? { ...p, authorized: !p.authorized } : p
-        )
-      );
-      message.success(`${record.plate} is now ${!record.authorized ? 'Authorized' : 'Denied'}`);
-    } else {
-      message.error('Failed to toggle');
+      if (res.ok) {
+        // optimistic toggle — server will send plates_list too
+        setPlates(prev =>
+          prev.map(p =>
+            p.plate === record.plate ? { ...p, authorized: !p.authorized } : p
+          )
+        );
+        message.success(`${record.plate} is now ${!record.authorized ? 'Authorized' : 'Denied'}`);
+      } else {
+        message.error('Failed to toggle');
+      }
+    } catch (err) {
+      console.error(err);
+      message.error('Server error');
     }
-  } catch (err) {
-    message.error('Server error');
-  }
-};
-
+  };
 
   useEffect(() => {
-  fetch(`${API_BASE_URL}/plates`)
-    .then(res => res.json())
-    .then(data => {
-      const formatted = data.map((item, index) => ({
-        key: item.plate,
-        plate: item.plate,
-        authorized: item.authorized === 'True',
-      }));
-      setPlates(formatted);
-    })
-    .catch(err => {
-      console.error('Failed to load plates:', err);
-      message.error('Could not load plates');
+    // initial fetch (fallback if socket doesn't immediately send plates_list)
+    fetch(`${API_BASE_URL}/plates`)
+      .then(res => res.json())
+      .then(data => {
+        const formatted = data.map((item) => ({
+          key: item.plate,
+          plate: item.plate,
+          authorized: item.authorized === 'True',
+        }));
+        setPlates(formatted);
+      })
+      .catch(err => {
+        console.error('Failed to load plates:', err);
+        message.error('Could not load plates');
+      });
+
+    // create socket and listeners
+    const socket = io(API_BASE_URL, { transports: ['websocket'] });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('socket connected', socket.id);
     });
-}, []);
 
-
-const deletePlate = async (record) => {
-  try {
-    const res = await fetch(`${API_BASE_URL}/plates/${record.plate}`, {
-      method: 'DELETE',
+    socket.on('disconnect', () => {
+      console.log('socket disconnected');
     });
 
-    if (res.ok) {
-      setPlates(prev => prev.filter(p => p.plate !== record.plate));
-      message.success(`Deleted plate "${record.plate}"`);
-    } else {
-      message.error('Failed to delete');
+    // frame event: server sends { image: "<base64 string>" }
+    socket.on('frame', (data) => {
+      if (data && data.image) {
+        setFrameSrc(`data:image/jpeg;base64,${data.image}`);
+      }
+    });
+
+    // plate_detected: { plate, confidence, authorized }
+    socket.on('plate_detected', (d) => {
+      if (!d) return;
+      // normalize incoming payload shape safety
+      const payload = {
+        plate: d.plate || d?.plate_text || '',
+        confidence: d.confidence != null ? d.confidence : (d.prob || 0),
+        authorized: !!d.authorized
+      };
+      setDetectedPlate(payload);
+
+      // optional: highlight or update row state to reflect recent detection
+      setPlates(prev => prev.map(p => p.plate === payload.plate ? { ...p, lastSeenAuthorized: payload.authorized } : p));
+    });
+
+    // receive full plates list broadcasted from backend
+    socket.on('plates_list', (data) => {
+      if (!Array.isArray(data)) return;
+      try {
+        const formatted = data.map((item) => ({
+          key: item.plate,
+          plate: item.plate,
+          authorized: item.authorized === 'True'
+        }));
+        setPlates(formatted);
+      } catch (err) {
+        console.error('Malformed plates_list', err);
+      }
+    });
+
+    return () => {
+      if (socket) socket.disconnect();
+    };
+  }, []);
+
+  const deletePlate = async (record) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/plates/${record.plate}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        // optimistic removal (server will broadcast plates_list too)
+        setPlates(prev => prev.filter(p => p.plate !== record.plate));
+        message.success(`Deleted plate "${record.plate}"`);
+      } else {
+        message.error('Failed to delete');
+      }
+    } catch (err) {
+      console.error(err);
+      message.error('Server error');
     }
-  } catch (err) {
-    message.error('Server error');
-  }
-};
-
+  };
 
   const handleLogout = () => {
     sessionStorage.clear();
     navigate('/login');
   };
 
-  // Here’s the only change: render <Plate /> instead of plain text
   const columns = [
     {
       title: 'Plate',
@@ -251,25 +322,15 @@ const deletePlate = async (record) => {
         <Content style={{ margin: '16px' }}>
           <Card title="Plates List" bordered={false}>
             <Table
-              dataSource={plates.map((p) => ({ key: p.id, ...p }))}
+              dataSource={plates}
               columns={columns}
               pagination={false}
+              rowKey="plate"
             />
           </Card>
-          
+
           <Card title="Camera Feed" bordered={false} style={{ marginTop: '16px' }}>
-            <div style={{ textAlign: 'center' }}>
-              {/* Debug info */}
-              <div style={{ 
-                marginBottom: '10px', 
-                fontSize: '12px', 
-                color: '#666',
-                textAlign: 'center'
-              }}>
-                Camera Server: {CAMERA_SERVER_URL}
-              </div>
-              <CameraFeed />
-            </div>
+            <CameraFeed frameSrc={frameSrc} detectedPlate={detectedPlate} />
           </Card>
         </Content>
       </Layout>
