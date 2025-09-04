@@ -1,6 +1,6 @@
 // src/pages/AdminPanel.jsx
 import React, { useState, useEffect } from 'react';
-
+import io from 'socket.io-client';
 import API_BASE_URL from '../config';
 
 // Camera server configuration
@@ -30,6 +30,44 @@ import { useNavigate } from 'react-router-dom';
 import Plate from '../components/Plate';
 
 const { Header, Content, Sider } = Layout;
+
+const CameraFeed = () => {
+  const [image, setImage] = useState(null);
+
+  useEffect(() => {
+    const socket = io(API_BASE_URL); // same backend server
+    socket.on("frame", (data) => {
+      setImage("data:image/jpeg;base64," + data.image);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ marginBottom: '10px', fontSize: '12px', color: '#666' }}>
+        Live Camera Feed
+      </div>
+      {image ? (
+        <img
+          src={image}
+          alt="Camera"
+          style={{
+            width: '100%',
+            maxWidth: '640px',
+            height: 'auto',
+            border: '1px solid #d9d9d9',
+            borderRadius: '10px',
+          }}
+        />
+      ) : (
+        <p>Waiting for camera...</p>
+      )}
+    </div>
+  );
+};
 
 const AdminPanel = () => {
   const navigate = useNavigate();
@@ -230,28 +268,14 @@ const deletePlate = async (record) => {
               }}>
                 Camera Server: {CAMERA_SERVER_URL}
               </div>
-              <iframe 
-                src={CAMERA_SERVER_URL}
-                style={{
-                  width: '100%',
-                  maxWidth: '640px',
-                  height: 'min(75vw, 480px)',
-                  border: '1px solid #d9d9d9',
-                  borderRadius: '10px',
-                  overflow: 'hidden'
-                }}
-                title="Camera Feed"
-                frameBorder="0"
-                scrolling="no"
-                seamless
-              />
+              <CameraFeed />
             </div>
           </Card>
         </Content>
       </Layout>
 
       <Modal
-        title="Add a New Plate"
+        title="Add a Not New Plate"
         open={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
         footer={null}
