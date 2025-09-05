@@ -5,8 +5,8 @@
 #include "esp_http_server.h"
 
 // Replace with your network credentials
-const char* ssid = "<ssid>";
-const char* password = "<password>";
+const char* ssid = "KIR TO BARGh";
+const char* password = "8SaHaNd44";
 
 // Camera model
 #define CAMERA_MODEL_AI_THINKER
@@ -91,6 +91,18 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   return res;
 }
 
+static esp_err_t capture_handler(httpd_req_t *req) {
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    return httpd_resp_send_500(req);
+  }
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  esp_err_t res = httpd_resp_send(req, (const char *)fb->buf, fb->len);
+  esp_camera_fb_return(fb);
+  return res;
+}
+
 void startCameraServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = 80;
@@ -103,8 +115,16 @@ void startCameraServer() {
     .user_ctx  = NULL
   };
 
+  httpd_uri_t jpg_uri = {
+    .uri       = "/jpg",
+    .method    = HTTP_GET,
+    .handler   = capture_handler,
+    .user_ctx  = NULL
+  };
+
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(stream_httpd, &stream_uri);
+    // httpd_register_uri_handler(stream_httpd, &stream_uri);
+    httpd_register_uri_handler(stream_httpd, &jpg_uri);
   }
 }
 
@@ -139,11 +159,11 @@ void setup() {
 
   if(psramFound()){
     config.frame_size = FRAMESIZE_VGA;
-    config.jpeg_quality = 22;
+    config.jpeg_quality = 30;
     config.fb_count = 1;
   } else {
-    config.frame_size = FRAMESIZE_CIF;
-    config.jpeg_quality = 30;
+    config.frame_size = FRAMESIZE_VGA;
+    config.jpeg_quality = 15;
     config.fb_count = 1;
   }
 
