@@ -3,9 +3,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import API_BASE_URL from '../config';
 
-// Camera server configuration
-const CAMERA_SERVER_URL = import.meta.env.VITE_CAMERA_SERVER_URL || 'http://192.168.1.33/';
-
 import {
   Layout,
   Menu,
@@ -34,25 +31,23 @@ const { Header, Content, Sider } = Layout;
 const CameraFeed = ({ frameSrc, detectedPlate }) => {
   return (
     <div style={{ textAlign: 'center' }}>
-      <div style={{ marginBottom: '10px', fontSize: '12px', color: '#666' }}>
-        Camera Server: {CAMERA_SERVER_URL}
-      </div>
-
-      <div style={{ marginBottom: '8px' }}>
-        {detectedPlate ? (
-          <div style={{ fontWeight: 600 }}>
-            Detected plate: {detectedPlate.plate} &nbsp; — &nbsp;
-            {detectedPlate.authorized ? (
-              <span style={{ color: 'green' }}>AUTHORIZED</span>
-            ) : (
-              <span style={{ color: 'red' }}>NOT AUTHORIZED</span>
-            )}
-            &nbsp; ({Number(detectedPlate.confidence).toFixed(2)})
-          </div>
-        ) : (
-          <div style={{ color: '#888' }}>No plate detected</div>
-        )}
-      </div>
+      {frameSrc && (
+        <div style={{ marginBottom: '8px' }}>
+          {detectedPlate ? (
+            <div style={{ fontWeight: 600 }}>
+              Detected plate: {detectedPlate.plate} &nbsp; — &nbsp;
+              {detectedPlate.authorized ? (
+                <span style={{ color: 'green' }}>AUTHORIZED</span>
+              ) : (
+                <span style={{ color: 'red' }}>NOT AUTHORIZED</span>
+              )}
+              &nbsp; ({Number(detectedPlate.confidence).toFixed(2)})
+            </div>
+          ) : (
+            <div style={{ color: '#888' }}>No plate detected</div>
+          )}
+        </div>
+      )}
 
       {frameSrc ? (
         <img
@@ -86,6 +81,17 @@ const AdminPanel = () => {
 
   // keep socket ref so we can reuse/cleanup
   const socketRef = useRef(null);
+
+  // track rows being updated to avoid optimistic mismatches
+  const [updatingPlates, setUpdatingPlates] = useState(new Set());
+  const markUpdating = (plate, isUpdating) => {
+    setUpdatingPlates(prev => {
+      const next = new Set(prev);
+      if (isUpdating) next.add(plate);
+      else next.delete(plate);
+      return next;
+    });
+  };
 
   const openModal = () => {
     addForm.resetFields();
@@ -123,25 +129,43 @@ const AdminPanel = () => {
   };
 
   const toggleAuthorized = async (record) => {
+    // show loading on the switch to prevent rapid flips and stale UI
+    markUpdating(record.plate, true);
     try {
       const res = await fetch(`${API_BASE_URL}/plates/${record.plate}`, {
         method: 'PATCH',
       });
 
-      if (res.ok) {
-        // optimistic toggle — server will send plates_list too
-        setPlates(prev =>
-          prev.map(p =>
-            p.plate === record.plate ? { ...p, authorized: !p.authorized } : p
-          )
-        );
-        message.success(`${record.plate} is now ${!record.authorized ? 'Authorized' : 'Denied'}`);
-      } else {
+      if (!res.ok) {
         message.error('Failed to toggle');
+        return;
+      }
+
+      // Hard refresh this list from server to avoid optimistic mismatches
+      const listRes = await fetch(`${API_BASE_URL}/plates`);
+      if (listRes.ok) {
+        const data = await listRes.json();
+        const formatted = data.map((item) => ({
+          key: item.plate,
+          plate: item.plate,
+          authorized: item.authorized === 'True',
+        }));
+        setPlates(formatted);
+        const current = formatted.find(p => p.plate === record.plate);
+        if (current) {
+          message.success(`${record.plate} is now ${current.authorized ? 'Authorized' : 'Denied'}`);
+        } else {
+          message.success(`Updated ${record.plate}`);
+        }
+      } else {
+        // fallback: rely on socket 'plates_list' to arrive shortly
+        message.success(`Toggled ${record.plate}`);
       }
     } catch (err) {
       console.error(err);
       message.error('Server error');
+    } finally {
+      markUpdating(record.plate, false);
     }
   };
 
@@ -257,6 +281,8 @@ const AdminPanel = () => {
         <Switch
           checked={auth}
           onChange={() => toggleAuthorized(record)}
+          loading={updatingPlates.has(record.plate)}
+          disabled={updatingPlates.has(record.plate)}
         />
       )
     },
